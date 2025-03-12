@@ -1,0 +1,15 @@
+langchain>=0.1.0
+langchain-openai>=0.1.2
+langchain-anthropic
+langgraph==0.2.62
+langchain-experimental
+langchain-chroma>=0.1.2
+lark
+pypdf
+polygon-api-client
+brave-search
+streamlit
+ipywidgets
+matplotlib
+pandas
+networkx
