@@ -60,6 +60,7 @@ def detect_company_ticker(query: str) -> str:
     Returns:
         Company ticker symbol if detected, empty string otherwise
     """
+    try:
     company_map = {
         # Major tech companies
         "apple": "AAPL", "microsoft": "MSFT", "google": "GOOGL", 
@@ -85,6 +86,9 @@ def detect_company_ticker(query: str) -> str:
         if word.isupper() and 1 <= len(word) <= 5 and word in [t.upper() for t in company_map.values()]:
             return word
     
+    return ""
+except Exception as e:
+    logger.error(f"Error detecting company ticker: {e}")
     return ""
 
 def determine_mode_by_keywords(query: str) -> tuple:
