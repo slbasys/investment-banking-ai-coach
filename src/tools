@@ -1,0 +1,297 @@
+"""
+Financial data tools for the Investment Banking AI Coach.
+
+This module provides tools for retrieving financial data from external APIs
+including stock price data and company information from Polygon API, as well as
+web search integration with Brave Search.
+"""
+
+import os
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+import requests
+
+from langchain_core.tools import tool
+from langchain_community.utilities.brave_search import BraveSearchWrapper
+from langchain_core.documents import Document
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Initialize API clients
+try:
+    brave_search = BraveSearchWrapper(api_key=os.environ.get("BRAVE_API_KEY"))
+    logger.info("Brave Search API initialized")
+except Exception as e:
+    logger.warning(f"Error initializing Brave Search API: {e}")
+    brave_search = None
+
+@tool
+def get_stock_data(ticker: str) -> Dict:
+    """
+    Get historical stock price data for a ticker using Polygon API free tier.
+    
+    Args:
+        ticker: Stock ticker symbol (e.g., AAPL, MSFT)
+        
+    Returns:
+        Dictionary with stock price data or error information
+    """
+    try:
+        logger.info(f"Attempting to get stock data for {ticker}")
+        api_key = os.environ.get("POLYGON_API_KEY")
+        logger.info(f"API key exists: {bool(api_key)}")
+        
+        # Get yesterday's date and the day before
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        day_before = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+        
+        # Use the aggregates endpoint (available in free tier)
+        url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{day_before}/{yesterday}?apiKey={api_key}"
+        response = requests.get(url)
+        data = response.json()
+        
+        logger.info(f"Response received: {data.get('status')}")
+        
+        if data.get('results'):
+            # Extract data from the first result
+            latest_data = data['results'][0]
+            result = {
+                "ticker": ticker,
+                "close_price": latest_data['c'],
+                "open_price": latest_data['o'],
+                "high_price": latest_data['h'],
+                "low_price": latest_data['l'],
+                "volume": latest_data['v'],
+                "timestamp": datetime.fromtimestamp(latest_data['t']/1000).strftime('%Y-%m-%d'),
+                "source": "Polygon.io (Delayed)"
+            }
+            logger.info(f"Extracted data: {result}")
+            return result
+        else:
+            logger.warning(f"Error or no results in response: {data}")
+            return {"error": f"No results found for {ticker}", "data": data}
+            
+    except Exception as e:
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error details: {str(e)}")
+        return {"error": f"Failed to get stock data: {str(e)}"}
+
+@tool
+def get_company_details(ticker: str) -> Dict:
+    """
+    Get company details using Polygon API free tier.
+    
+    Args:
+        ticker: Stock ticker symbol (e.g., AAPL, MSFT)
+        
+    Returns:
+        Dictionary with company information or error details
+    """
+    try:
+        logger.info(f"Attempting to get company details for {ticker}")
+        api_key = os.environ.get("POLYGON_API_KEY")
+        
+        # Use the Ticker Details endpoint (available in free tier)
+        url = f"https://api.polygon.io/v3/reference/tickers/{ticker}?apiKey={api_key}"
+        response = requests.get(url)
+        data = response.json()
+        
+        if data.get('results'):
+            company = data['results']
+            result = {
+                "ticker": company.get('ticker'),
+                "name": company.get('name'),
+                "description": company.get('description'),
+                "market_cap": company.get('market_cap'),
+                "industry": company.get('sic_description'),
+                "homepage_url": company.get('homepage_url'),
+                "primary_exchange": company.get('primary_exchange')
+            }
+            return result
+        else:
+            return {"error": f"No company details found for {ticker}"}
+            
+    except Exception as e:
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error details: {str(e)}")
+        return {"error": f"Failed to get company details: {str(e)}"}
+
+@tool
+def web_search(query: str, prefix: str = "finance", limit: int = 5) -> str:
+    """
+    Perform a web search for current information using Brave Search API.
+    
+    Args:
+        query: Search query
+        prefix: Optional prefix to add to the query (default: "finance")
+        limit: Maximum number of results to return
+        
+    Returns:
+        Formatted string with search results
+    """
+    try:
+        if not brave_search:
+            return "Brave Search API is not configured properly"
+        
+        # Add prefix if provided
+        search_query = f"{prefix} {query}" if prefix else query
+        logger.info(f"Performing web search for: {search_query}")
+        
+        # Execute search
+        search_results = brave_search.run(search_query)
+        
+        # Format the results
+        return search_results
+        
+    except Exception as e:
+        logger.error(f"Web search error: {str(e)}")
+        return f"Error performing web search: {str(e)}"
+
+def search_financial_news(company_ticker: str = None, topic: str = None) -> List[Document]:
+    """
+    Search for financial news about a company or topic.
+    
+    Args:
+        company_ticker: Optional company ticker to search for
+        topic: Optional financial topic to search for
+        
+    Returns:
+        List of Document objects containing news information
+    """
+    try:
+        # Construct search query
+        query_parts = []
+        if company_ticker:
+            query_parts.append(company_ticker)
+        if topic:
+            query_parts.append(topic)
+        
+        if not query_parts:
+            query = "latest financial news"
+        else:
+            query = " ".join(query_parts) + " financial news latest"
+        
+        # Perform search
+        search_result = web_search(query, prefix="", limit=3)
+        
+        # Create document
+        doc = Document(
+            page_content=f"Latest financial news: {search_result}",
+            metadata={
+                "source": "brave_search",
+                "query": query,
+                "type": "financial_news"
+            }
+        )
+        
+        return [doc]
+    except Exception as e:
+        logger.error(f"Error searching financial news: {str(e)}")
+        return []
+
+def get_aggregate_financial_data(ticker: str, timespan: str = "day", multiplier: int = 1, 
+                               from_date: str = None, to_date: str = None) -> Dict:
+    """
+    Get aggregate financial data for a ticker over a specified timespan.
+    
+    Args:
+        ticker: Stock ticker symbol
+        timespan: Time span (minute, hour, day, week, month, quarter, year)
+        multiplier: Number of timespans to aggregate
+        from_date: Start date in format YYYY-MM-DD (defaults to 5 periods ago)
+        to_date: End date in format YYYY-MM-DD (defaults to yesterday)
+        
+    Returns:
+        Dictionary with aggregated financial data
+    """
+    try:
+        api_key = os.environ.get("POLYGON_API_KEY")
+        
+        # Set default dates if not provided
+        if not to_date:
+            to_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        if not from_date:
+            # Default to 5 periods ago based on timespan
+            days_back = 5
+            if timespan == "day":
+                days_back = 5
+            elif timespan == "week":
+                days_back = 35
+            elif timespan == "month":
+                days_back = 150
+            from_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+        
+        url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from_date}/{to_date}?apiKey={api_key}"
+        response = requests.get(url)
+        data = response.json()
+        
+        if data.get('results'):
+            return {
+                "ticker": ticker,
+                "timespan": timespan,
+                "from_date": from_date,
+                "to_date": to_date,
+                "results": data.get('results'),
+                "status": data.get('status')
+            }
+        else:
+            return {"error": f"No aggregate data found for {ticker}", "response": data}
+    
+    except Exception as e:
+        logger.error(f"Error getting aggregate data: {str(e)}")
+        return {"error": f"Failed to get aggregate data: {str(e)}"}
+
+# Test functions for module validation (not used in production)
+def test_polygon_api():
+    """Test the Polygon API with some example tickers"""
+    print("\n=== Testing Polygon API ===")
+    test_tickers = ["AAPL", "MSFT", "GOOGL"]
+    
+    for ticker in test_tickers:
+        print(f"\nTesting ticker: {ticker}")
+        test_result = get_stock_data(ticker)
+        
+        if "error" in test_result:
+            print(f"❌ Error: {test_result['error']}")
+        else:
+            print(f"✅ Success: {ticker} data retrieved")
+            print(f"  Date: {test_result['timestamp']}")
+            print(f"  Close: ${test_result['close_price']}")
+            print(f"  Open: ${test_result['open_price']}")
+            print(f"  High: ${test_result['high_price']}")
+            print(f"  Low: ${test_result['low_price']}")
+            print(f"  Volume: {test_result['volume']:,}")
+
+def test_company_details():
+    """Test the Ticker Details API with some example tickers"""
+    print("\n=== Testing Polygon Ticker Details API ===")
+    test_tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
+    
+    for ticker in test_tickers:
+        print(f"\nTesting ticker: {ticker}")
+        test_result = get_company_details(ticker)
+        
+        if "error" in test_result:
+            print(f"❌ Error: {test_result['error']}")
+        else:
+            print(f"✅ Success: {ticker} company details retrieved")
+            print(f"  Company Name: {test_result.get('name', 'N/A')}")
+            print(f"  Market Cap: ${test_result.get('market_cap', 'N/A'):,}" if test_result.get('market_cap') else "  Market Cap: N/A")
+            print(f"  Industry: {test_result.get('industry', 'N/A')}")
+            print(f"  Exchange: {test_result.get('primary_exchange', 'N/A')}")
+            
+            # Print description (truncated for readability)
+            description = test_result.get('description', 'N/A')
+            if len(description) > 100:
+                description = description[:100] + "..."
+            print(f"  Description: {description}")
+            print(f"  Website: {test_result.get('homepage_url', 'N/A')}")
+
+# Main execution for testing (only when the file is run directly)
+if __name__ == "__main__":
+    test_polygon_api()
+    test_company_details()
