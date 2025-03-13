@@ -4,6 +4,7 @@ langchain-anthropic
 langgraph==0.2.62
 langchain-experimental
 langchain-chroma>=0.1.2
+chromadb
 lark
 pypdf
 polygon-api-client
@@ -13,4 +14,3 @@ ipywidgets
 matplotlib
 pandas
 networkx
-chromadb
