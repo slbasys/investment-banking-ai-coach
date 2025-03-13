@@ -13,3 +13,4 @@ ipywidgets
 matplotlib
 pandas
 networkx
+chromadb
